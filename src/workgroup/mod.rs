@@ -25,11 +25,11 @@ impl WorkGroup {
     }
 
     pub fn push_job<TJob: job::Job + 'static>(&self, job: TJob) {
-        self.job_queue.push(job);
+        self.job_queue.push_job(job);
     }
 
     pub fn push_single_job<TJob: Fn() + 'static>(&self, job: TJob) {
-        self.job_queue.push(SingleJob::new(job));
+        self.push_job(SingleJob::new(job));
     }
 
     pub fn wait_work_consumed(&self) {

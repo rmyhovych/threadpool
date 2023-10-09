@@ -1,9 +1,5 @@
 use std::{
-    sync::{
-        atomic::{AtomicBool, AtomicU32, AtomicU64},
-        Arc,
-    },
-    thread,
+    sync::{atomic::AtomicU64, Arc},
     time::{Duration, Instant},
 };
 use threadpool::workgroup::WorkGroup;
@@ -13,7 +9,7 @@ fn work_runner(worker_count: usize) -> Duration {
 
     let instant_start = Instant::now();
     let collector = Arc::new(AtomicU64::new(0));
-    for _ in 0..10000000  {
+    for _ in 0..10000000 {
         let local_collector = collector.clone();
         site.push_single_job(move || {
             let mut val: u128 = 0;
