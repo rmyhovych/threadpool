@@ -1,9 +1,12 @@
 use std::sync::atomic;
 
-use self::waitable::{AtomicWrapper, WaitableAtomic};
+use self::{waitable::WaitableAtomic, wrapper::AtomicWrapper};
 
 pub mod spinlock;
 pub mod waitable;
+pub mod wrapper;
+
+mod platform;
 
 /*------------------------------------------------------------*/
 

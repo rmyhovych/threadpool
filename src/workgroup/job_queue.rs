@@ -13,88 +13,47 @@ pub enum WorkEvent {
 
 /*------------------------------------------------------------*/
 
-enum WorkStateFlags {
-    Available,
-    Exit,
-}
-
-struct WaitableQueueState {
-    worker_atomic: WaitableAtomicU8,
-}
-
-impl WaitableQueueState {
-    fn new() -> Self {
-        Self {
-            worker_atomic: WaitableAtomicU8::new(0),
-        }
-    }
-
-    fn wait_flag(&self) -> WorkStateFlags {
-        let flags = self.worker_atomic.wait_until(|val| (val & 0b11) > 0);
-        if flags & 0b10 > 0 {
-            WorkStateFlags::Exit
-        } else {
-            WorkStateFlags::Available
-        }
-    }
-
-    fn notify_work_available(&self) {
-        self.worker_atomic.fetch_or(0b01, atomic::Ordering::Acquire);
-        self.worker_atomic.wake_one();
-    }
-
-    fn clear_work_available(&self) {
-        self.worker_atomic
-            .fetch_and(!0b01, atomic::Ordering::Release);
-    }
-
-    fn notify_exit(&self) {
-        self.worker_atomic.fetch_or(0b10, atomic::Ordering::Acquire);
-        self.worker_atomic.wake_all();
-    }
-}
-
-/*------------------------------------------------------------*/
-
 pub struct JobQueue {
     job_queue: SpinLock<VecDeque<Box<dyn job::Job>>>,
-    queue_state: WaitableQueueState,
+    state: WaitableAtomicU8,
 }
 
 impl JobQueue {
+    const FLAG_WORK_AVAILABLE: u8 = 0b0001;
+    const FLAG_EXIT: u8 = 0b0010;
+
     pub fn new() -> Self {
         Self {
             job_queue: SpinLock::new(VecDeque::new()),
-            queue_state: WaitableQueueState::new(),
+            state: WaitableAtomicU8::new(0),
         }
     }
 
     pub fn flag_exit(&self) {
-        self.queue_state.notify_exit();
-    }
-
-    pub fn wait_work_consumed(&self) {
-        self.queue_state.wait_work_consumed();
+        self.state
+            .fetch_or(Self::FLAG_EXIT, atomic::Ordering::Release);
+        self.state.wake_all();
     }
 
     pub fn wait_event(&self) -> WorkEvent {
         loop {
-            match self.queue_state.wait_flag() {
-                WorkStateFlags::Available => {
-                    let mut guarded_job_queue = self.job_queue.lock();
-                    match guarded_job_queue.pop_front() {
-                        Some(job) => {
-                            if guarded_job_queue.is_empty() {
-                                self.queue_state.clear_work_available();
-                            }
-
-                            break WorkEvent::WorkAvailable(job);
+            let state = self.state.wait_not(0, 0);
+            if state & Self::FLAG_EXIT > 0 {
+                break WorkEvent::Exit;
+            } else if state & Self::FLAG_WORK_AVAILABLE > 0 {
+                let mut guarded_job_queue = self.job_queue.lock();
+                match guarded_job_queue.pop_front() {
+                    Some(job) => {
+                        if guarded_job_queue.is_empty() {
+                            self.state
+                                .fetch_and(!Self::FLAG_WORK_AVAILABLE, atomic::Ordering::Relaxed);
                         }
-                        None => {}
+
+                        break WorkEvent::Available(job);
                     }
-                }
-                WorkStateFlags::Exit => {
-                    break WorkEvent::Exit;
+                    None => {
+                        // Last job was claimed by a different worker, return to the waiting state.
+                    }
                 }
             }
         }
@@ -103,6 +62,8 @@ impl JobQueue {
     pub fn push_job<TJob: job::Job + 'static>(&self, job: TJob) {
         let mut guarded_job_queue = self.job_queue.lock();
         guarded_job_queue.push_back(Box::new(job));
-        self.queue_state.notify_work_available();
+        self.state
+            .fetch_or(Self::FLAG_WORK_AVAILABLE, atomic::Ordering::Release);
+        self.state.wake_one();
     }
 }

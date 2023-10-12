@@ -1,57 +1,12 @@
 use std::{marker::PhantomData, ops::Deref, sync::atomic, thread};
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
-#[path = "linux.rs"]
-mod platform;
-
-#[cfg(any(target_os = "macos", target_os = "ios", target_os = "watchos"))]
-#[path = "macos.rs"]
-mod platform;
-
-#[cfg(windows)]
-#[path = "windows.rs"]
-mod platform;
-
-#[cfg(target_os = "freebsd")]
-#[path = "freebsd.rs"]
-mod platform;
-
-/*------------------------------------------------------------*/
-
-fn wake_one<TAtomicType>(atomic: &TAtomicType) {
-    platform::wake_one(atomic);
-}
-
-fn wake_all<TAtomicType>(atomic: &TAtomicType) {
-    platform::wake_all(atomic);
-}
-
-fn wait_not<TAtomicType, TValueType>(atomic: &TAtomicType, expected_not: TValueType) {
-    platform::wait_not(atomic, expected_not);
-}
-
-/*------------------------------------------------------------*/
-
-pub trait AtomicWrapper<TAtomicType, TValueType: Copy> {
-    fn new(value: TValueType) -> Self;
-    fn get_atomic(&self) -> &TAtomicType;
-
-    fn load(&self, order: atomic::Ordering) -> TValueType;
-    fn store(&self, value: TValueType, order: atomic::Ordering);
-    fn compare_exchange(
-        &self,
-        value_current: TValueType,
-        value_new: TValueType,
-        order_success: atomic::Ordering,
-        order_failure: atomic::Ordering,
-    ) -> Result<TValueType, TValueType>;
-}
+use super::{platform::platform, wrapper::AtomicWrapper};
 
 /*------------------------------------------------------------*/
 
 pub struct WaitableAtomic<
     TAtomicType,
-    TValueType: Copy,
+    TValueType: Sized + Copy + PartialEq,
     TAtomicWrapperType: AtomicWrapper<TAtomicType, TValueType>,
 > {
     atomic: TAtomicWrapperType,
@@ -61,12 +16,10 @@ pub struct WaitableAtomic<
 
 impl<
         TAtomicType,
-        TValueType: Copy + PartialEq,
+        TValueType: Sized + Copy + PartialEq,
         TAtomicWrapperType: AtomicWrapper<TAtomicType, TValueType>,
     > WaitableAtomic<TAtomicType, TValueType, TAtomicWrapperType>
 {
-    const YIELD_COUNT: u32 = 1000;
-
     pub fn new(initial_value: TValueType) -> Self {
         Self {
             atomic: TAtomicWrapperType::new(initial_value),
@@ -76,17 +29,18 @@ impl<
     }
 
     pub fn wake_one(&self) {
-        wake_one(&self.atomic);
+        platform::wake_one(&self.atomic);
     }
 
     pub fn wake_all(&self) {
-        wake_all(&self.atomic);
+        platform::wake_all(&self.atomic);
     }
 
     pub fn wait_exchange(
         &self,
         current: TValueType,
         new: TValueType,
+        yield_count: u32,
         order_success: atomic::Ordering,
         order_failure: atomic::Ordering,
     ) {
@@ -98,11 +52,11 @@ impl<
                 break;
             }
 
-            self.wait_until(move |value| value == current);
+            self.wait_until(move |value| value == current, yield_count);
         }
     }
 
-    pub fn wait_not(&self, expected_not: TValueType) -> TValueType {
+    pub fn wait_not(&self, expected_not: TValueType, yield_count: u32) -> TValueType {
         let mut loop_count: u32 = 0;
         loop {
             let value = self.atomic.load(atomic::Ordering::Relaxed);
@@ -110,17 +64,21 @@ impl<
                 break value;
             }
 
-            if loop_count < Self::YIELD_COUNT {
+            if loop_count < yield_count {
                 thread::yield_now();
                 loop_count += 1;
             } else {
-                wait_not(self.atomic.get_atomic(), expected_not);
+                platform::wait_not(&self.atomic, expected_not);
                 break self.atomic.load(atomic::Ordering::Relaxed);
             }
         }
     }
 
-    pub fn wait_until<TCheckFuncType>(&self, check_functor: TCheckFuncType) -> TValueType
+    pub fn wait_until<TCheckFuncType>(
+        &self,
+        check_functor: TCheckFuncType,
+        yield_count: u32,
+    ) -> TValueType
     where
         TCheckFuncType: Fn(TValueType) -> bool,
     {
@@ -129,14 +87,17 @@ impl<
             if check_functor(curr) {
                 break curr;
             } else {
-                curr = self.wait_not(curr);
+                curr = self.wait_not(curr, yield_count);
             }
         }
     }
 }
 
-impl<TAtomicType, TValueType: Copy, TAtomicWrapperType: AtomicWrapper<TAtomicType, TValueType>>
-    Deref for WaitableAtomic<TAtomicType, TValueType, TAtomicWrapperType>
+impl<
+        TAtomicType,
+        TValueType: Sized + Copy + PartialEq,
+        TAtomicWrapperType: AtomicWrapper<TAtomicType, TValueType>,
+    > Deref for WaitableAtomic<TAtomicType, TValueType, TAtomicWrapperType>
 {
     type Target = TAtomicType;
 

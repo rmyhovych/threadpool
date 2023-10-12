@@ -36,8 +36,8 @@ impl<'a, TObject> Drop for SpinLockGuard<'a, TObject> {
 /*------------------------------------------------------------*/
 
 pub struct SpinLock<TObject> {
-    atomic: WaitableAtomicU8,
     object: TObject,
+    atomic: WaitableAtomicU8,
 }
 
 impl<TObject> SpinLock<TObject> {
@@ -49,8 +49,13 @@ impl<TObject> SpinLock<TObject> {
     }
 
     pub fn lock<'a>(&'a self) -> SpinLockGuard<'a, TObject> {
-        self.atomic
-            .wait_exchange(0, 1, atomic::Ordering::Acquire, atomic::Ordering::Relaxed);
+        self.atomic.wait_exchange(
+            0,
+            1,
+            1000,
+            atomic::Ordering::Acquire,
+            atomic::Ordering::Relaxed,
+        );
         unsafe {
             let object_ptr = &self.object as *const TObject as *mut TObject;
             let object = &mut *(object_ptr);

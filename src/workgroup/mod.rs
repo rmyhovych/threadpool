@@ -32,10 +32,6 @@ impl WorkGroup {
         self.push_job(SingleJob::new(job));
     }
 
-    pub fn wait_work_consumed(&self) {
-        self.job_queue.wait_work_consumed();
-    }
-
     pub fn exit(self) {
         self.job_queue.flag_exit();
         for worker in self.workers {

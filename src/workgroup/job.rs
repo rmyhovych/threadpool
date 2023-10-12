@@ -4,24 +4,19 @@ pub trait Job: Send {
 
 /*------------------------------------------*/
 
-pub struct SingleJob {
-    func: Box<dyn Fn()>,
+pub struct SingleJob<TFuncType: Fn()> {
+    func: TFuncType,
 }
 
-unsafe impl Send for SingleJob {}
+unsafe impl<TFuncType: Fn()> Send for SingleJob<TFuncType> {}
 
-impl SingleJob {
-    pub fn new<FuncType>(func: FuncType) -> Self
-    where
-        FuncType: Fn() + 'static,
-    {
-        Self {
-            func: Box::new(func),
-        }
+impl<TFuncType: Fn() + 'static> SingleJob<TFuncType> {
+    pub fn new(func: TFuncType) -> Self {
+        Self { func }
     }
 }
 
-impl Job for SingleJob {
+impl<TFuncType: Fn()> Job for SingleJob<TFuncType> {
     fn run(&self) {
         (self.func)();
     }

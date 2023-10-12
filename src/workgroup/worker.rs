@@ -1,4 +1,4 @@
-use super::job_queue::{JobQueue, QueueEvent};
+use super::job_queue::{JobQueue, WorkEvent};
 use std::{
     sync::Arc,
     thread::{self, JoinHandle},
@@ -13,10 +13,10 @@ impl Worker {
         let thread_handle = thread::Builder::new()
             .spawn(move || loop {
                 match job_queue.wait_event() {
-                    QueueEvent::WorkAvailable(job) => {
+                    WorkEvent::Available(job) => {
                         job.run();
                     }
-                    QueueEvent::Exit => break,
+                    WorkEvent::Exit => break,
                 }
             })
             .unwrap();
