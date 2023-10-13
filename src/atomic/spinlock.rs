@@ -1,6 +1,6 @@
 use std::{
     ops::{Deref, DerefMut},
-    sync::atomic,
+    sync::atomic, cell::UnsafeCell,
 };
 
 use super::WaitableAtomicU8;
@@ -36,7 +36,7 @@ impl<'a, TObject> Drop for SpinLockGuard<'a, TObject> {
 /*------------------------------------------------------------*/
 
 pub struct SpinLock<TObject> {
-    object: TObject,
+    object: UnsafeCell<TObject>,
     atomic: WaitableAtomicU8,
 }
 
@@ -44,7 +44,7 @@ impl<TObject> SpinLock<TObject> {
     pub fn new(object: TObject) -> Self {
         Self {
             atomic: WaitableAtomicU8::new(0),
-            object,
+            object: UnsafeCell::new(object),
         }
     }
 
@@ -57,7 +57,7 @@ impl<TObject> SpinLock<TObject> {
             atomic::Ordering::Relaxed,
         );
         unsafe {
-            let object_ptr = &self.object as *const TObject as *mut TObject;
+            let object_ptr = self.object.get();
             let object = &mut *(object_ptr);
 
             SpinLockGuard {

@@ -5,7 +5,7 @@ use std::{
 use threadpool::workgroup::WorkGroup;
 
 fn work_runner(worker_count: usize) -> Duration {
-    let job_count = 100;
+    let job_count = 100000;
 
     let site = WorkGroup::new(worker_count);
 
@@ -15,7 +15,7 @@ fn work_runner(worker_count: usize) -> Duration {
         let local_collector = collector.clone();
         site.push_single_job(move || {
             let mut val: u128 = 0;
-            for i in 0..(1 << 20) {
+            for i in 0..(1 << 8) {
                 for j in 0..(1 << 8) {
                     val *= j;
                 }
