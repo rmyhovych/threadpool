@@ -22,16 +22,16 @@ trait Matrix {
     fn get_memory_size(&self) -> usize;
 }
 
-type MatrixType = MatrixGrouped;
+type MatrixType = MatrixClassic;
 
 const MATRIX_SIZE: usize = 1 << 12;
 
 fn main() {
     let matrix0 = MatrixType::sequential(MATRIX_SIZE, MATRIX_SIZE);
-    let mut res = MatrixType::sequential(MATRIX_SIZE, 32);
+    let mut res = MatrixType::sequential(MATRIX_SIZE, 16);
 
     let instant_start = Instant::now();
-    for _ in 0..100 {
+    for _ in 0..1000 {
         res = matrix0.matmul(&res);
     }
     let duration = instant_start.elapsed();

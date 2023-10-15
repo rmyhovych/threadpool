@@ -3,7 +3,7 @@ use core::{
     sync::atomic::{AtomicU32, Ordering::Relaxed},
 };
 
-use crate::atomic::waitable::AtomicWrapper;
+use crate::atomic::wrapper::AtomicWrapper;
 
 // On macOS, atomic wait/wake functionality is not available through
 // any public/stable C interface, but is available through libc++.
