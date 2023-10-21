@@ -1,17 +1,16 @@
 use std::{
     mem::size_of,
-    sync::{mpsc, Arc},
-    thread::{self, ScopedJoinHandle},
+    ops,
+    sync::atomic::{self, AtomicUsize},
+    thread::{self},
 };
-
-use threadpool::atomic::spinlock::SpinLock;
 
 use crate::Matrix;
 
 const GROUP_WIDTH: usize = 16;
 const GROUP_SIZE: usize = GROUP_WIDTH * GROUP_WIDTH;
 
-const THREAD_COUNT: usize = 1;
+const THREAD_COUNT: usize = 20;
 
 struct Group {
     data: [f32; GROUP_SIZE],
@@ -34,6 +33,35 @@ impl Group {
 
     fn add(&mut self, y: usize, x: usize, val: f32) {
         self.data[y * GROUP_WIDTH + x] += val;
+    }
+
+    fn matmul(&self, other: &Self) -> Self {
+        let mut result_group: Group = Self::zero();
+        for y in 0..GROUP_WIDTH {
+            for x in 0..GROUP_WIDTH {
+                for i in 0..GROUP_WIDTH {
+                    result_group.add(y, x, self.get(y, i) * other.get(i, x));
+                }
+            }
+        }
+
+        result_group
+    }
+}
+
+impl Clone for Group {
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data.clone(),
+        }
+    }
+}
+
+impl ops::AddAssign for Group {
+    fn add_assign(&mut self, rhs: Self) {
+        for i in 0..GROUP_SIZE {
+            self.data[i] += rhs.data[i];
+        }
     }
 }
 
@@ -74,14 +102,7 @@ impl MatrixGrouped {
                 for i_group in 0..self.group_size.1 {
                     let group_left = self.get_group(new_group_y, i_group);
                     let group_right = other.get_group(i_group, new_group_x);
-
-                    for y in 0..GROUP_WIDTH {
-                        for x in 0..GROUP_WIDTH {
-                            for i in 0..GROUP_WIDTH {
-                                group_new.add(y, x, group_left.get(y, i) * group_right.get(i, x));
-                            }
-                        }
-                    }
+                    *group_new += group_left.matmul(group_right);
                 }
             }
         }
@@ -90,81 +111,50 @@ impl MatrixGrouped {
     }
 
     fn matmul_parallel(&self, other: &Self) -> Self {
+        let work_index = AtomicUsize::new(0);
         thread::scope(|scope| {
-            let work_queue = Arc::new(SpinLock::new({
-                let mut work_queue =
-                    Vec::<(usize, usize)>::with_capacity(self.group_size.0 * self.group_size.1);
-                for new_group_y in 0..self.group_size.0 {
-                    for new_group_x in 0..other.group_size.1 {
-                        work_queue.push((new_group_y, new_group_x));
-                    }
-                }
-
-                work_queue
-            }));
-
-            let thread_handles = (0..THREAD_COUNT)
+            let mut groups = (0..THREAD_COUNT)
                 .map(|_| {
-                    let local_work_queue = work_queue.clone();
-                    {
-                        scope.spawn(move || {
-                            let mut resulting_groups = Vec::<(usize, usize, Group)>::new();
-                            loop {
-                                let work = { local_work_queue.lock().pop() };
-                                match work {
-                                    Some((new_group_y, new_group_x)) => {
-                                        resulting_groups.push((
-                                            new_group_y,
-                                            new_group_x,
-                                            Group::zero(),
-                                        ));
-                                        let group_new = resulting_groups.last_mut().unwrap();
-                                        for i_group in 0..self.group_size.1 {
-                                            let group_left = self.get_group(new_group_y, i_group);
-                                            let group_right = other.get_group(i_group, new_group_x);
+                    scope.spawn(|| {
+                        let mut resulting_groups = Vec::<(usize, Vec<Group>)>::new();
+                        loop {
+                            let new_group_y = work_index.fetch_add(1, atomic::Ordering::Relaxed);
+                            if new_group_y < self.group_size.0 {
+                                let new_row_groups = (0..other.group_size.0)
+                                    .map(|new_group_x| {
+                                        let mut group_new = Group::zero();
+                                        for i in 0..self.group_size.1 {
+                                            let group_left = self.get_group(new_group_y, i);
+                                            let group_right = other.get_group(i, new_group_x);
 
-                                            for y in 0..GROUP_WIDTH {
-                                                for x in 0..GROUP_WIDTH {
-                                                    for i in 0..GROUP_WIDTH {
-                                                        group_new.2.add(
-                                                            y,
-                                                            x,
-                                                            group_left.get(y, i)
-                                                                * group_right.get(i, x),
-                                                        );
-                                                    }
-                                                }
-                                            }
+                                            group_new += group_left.matmul(group_right);
                                         }
-                                    }
-                                    None => break,
-                                }
+
+                                        group_new
+                                    })
+                                    .collect::<Vec<_>>();
+
+                                resulting_groups.push((new_group_y, new_row_groups));
+                            } else {
+                                break;
                             }
+                        }
 
-                            resulting_groups
-                        })
-                    }
+                        resulting_groups
+                    })
                 })
-                .collect::<Vec<ScopedJoinHandle<Vec<(usize, usize, Group)>>>>();
-
-            let mut groups = thread_handles
+                .collect::<Vec<_>>()
                 .into_iter()
                 .map(|handle| handle.join().unwrap())
                 .flatten()
-                .collect::<Vec<(usize, usize, Group)>>();
+                .collect::<Vec<(usize, Vec<Group>)>>();
 
-            groups.sort_by(|a, b| {
-                if a.0 == b.0 {
-                    a.1.cmp(&b.1)
-                } else {
-                    a.0.cmp(&b.0)
-                }
-            });
+            groups.sort_by(|a, b| a.0.cmp(&b.0));
 
             MatrixGrouped::new(
                 self.size.0,
                 other.size.1,
-                groups.into_iter().map(|g| g.2).collect(),
+                groups.into_iter().flat_map(|g| g.1).collect(),
             )
         })
     }
