@@ -1,7 +1,4 @@
-use core::{
-    ffi::c_void,
-    sync::atomic::{AtomicU32, Ordering::Relaxed},
-};
+use core::{ffi::c_void, sync::atomic::Ordering::Relaxed};
 
 use crate::atomic::wrapper::AtomicWrapper;
 

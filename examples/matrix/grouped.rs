@@ -10,7 +10,7 @@ use crate::Matrix;
 const GROUP_WIDTH: usize = 16;
 const GROUP_SIZE: usize = GROUP_WIDTH * GROUP_WIDTH;
 
-const THREAD_COUNT: usize = 20;
+const THREAD_COUNT: usize = 5;
 
 struct Group {
     data: [f32; GROUP_SIZE],

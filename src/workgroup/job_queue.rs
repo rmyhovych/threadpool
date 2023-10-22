@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, sync::atomic};
 
-use crate::atomic::{spinlock::SpinLock, WaitableAtomicU8};
+use crate::atomic::{lock::spinlock::SpinLock, WaitableAtomicU8};
 
 use super::job;
 

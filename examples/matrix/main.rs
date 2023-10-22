@@ -24,14 +24,14 @@ trait Matrix {
 
 type MatrixType = MatrixGrouped;
 
-const MATRIX_SIZE: usize = 1 << 14;
+const MATRIX_SIZE: usize = 1 << 11;
 
 fn main() {
     let matrix0 = MatrixType::sequential(MATRIX_SIZE, MATRIX_SIZE);
     let mut res = MatrixType::sequential(MATRIX_SIZE, MATRIX_SIZE);
 
     let instant_start = Instant::now();
-    for _ in 0..1 {
+    for _ in 0..10 {
         res = matrix0.matmul(&res);
     }
     let duration = instant_start.elapsed();
