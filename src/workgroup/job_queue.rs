@@ -2,19 +2,19 @@ use std::{collections::VecDeque, sync::atomic};
 
 use crate::atomic::{lock::spinlock::SpinLock, WaitableAtomicU8};
 
-use super::job;
+use super::Job;
 
 /*------------------------------------------------------------*/
 
 pub enum WorkEvent {
-    Available(Box<dyn job::Job>),
+    Available(Box<dyn Job>),
     Exit,
 }
 
 /*------------------------------------------------------------*/
 
 pub struct JobQueue {
-    job_queue: SpinLock<VecDeque<Box<dyn job::Job>>>,
+    job_queue: SpinLock<VecDeque<Box<dyn Job>>>,
     state: WaitableAtomicU8,
 }
 
@@ -59,7 +59,7 @@ impl JobQueue {
         }
     }
 
-    pub fn push_job<TJob: job::Job + 'static>(&self, job: TJob) {
+    pub fn push_job<TJob: Job + 'static>(&self, job: TJob) {
         let mut guarded_job_queue = self.job_queue.lock();
         guarded_job_queue.push_back(Box::new(job));
         self.state
